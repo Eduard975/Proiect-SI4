@@ -1,0 +1,1 @@
+Run `pnpm tsc -w` to compile the typescript
