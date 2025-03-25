@@ -1,8 +1,17 @@
 console.log("hihi");
 
 import { sbox_encrypt, sbox_decrypt } from "./consts";
-import { string_to_bytes } from "./utils"
+import { create_blocks, print_matrix, string_to_bytes } from "./utils";
+
 const test = 0x74;
 
-console.log(sbox_encrypt[test])
-console.log(string_to_bytes("test"))
+console.log(sbox_encrypt[test]);
+console.log(string_to_bytes("test"));
+
+console.log(create_blocks(string_to_bytes("test")));
+
+const blocks = create_blocks(string_to_bytes("test"));
+
+for (const element of blocks) {
+	print_matrix(element);
+}
