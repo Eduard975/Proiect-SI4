@@ -1,13 +1,14 @@
 console.log("hihi");
 
-import { sbox_encrypt, sbox_decrypt } from "./consts";
+import { sboxEncrypt, sboxDecrypt } from "./consts";
 import {
-	create_blocks,
-	inverse_order,
+	createBlocks,
+	inverseOrder,
 	type Matrix,
-	print_matrix,
+	printMatrix,
 	string_to_bytes,
-	substitute_encrypt,
+	substitute,
+	
 } from "./utils";
 
 const test2: Matrix = [
@@ -15,8 +16,10 @@ const test2: Matrix = [
 	0x62, 0xb0, 0xe7,
 ];
 
-print_matrix(inverse_order(test2));
+printMatrix(inverseOrder(test2));
 console.log();
-print_matrix(substitute_encrypt(inverse_order(test2)));
+printMatrix(substitute(inverseOrder(test2), sboxEncrypt));
 
-create_blocks(string_to_bytes("aashdashsdhasdh"));
+createBlocks(string_to_bytes("aashdashsdhasdh"));
+
+console.log()
