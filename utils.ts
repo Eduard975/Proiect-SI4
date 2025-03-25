@@ -1,4 +1,4 @@
-import { sbox_decrypt, sbox_encrypt } from "./consts";
+import { sboxDecrypt, sboxEncrypt } from "./consts";
 
 export function string_to_bytes(text: string): number[] {
 	const result: number[] = [];
@@ -29,7 +29,7 @@ export type Matrix = [
 	number,
 ];
 
-export function create_blocks(bytes: number[]): Matrix[] {
+export function createBlocks(bytes: number[]): Matrix[] {
 	const result: Matrix[] = [];
 	const x = bytes.length;
 
@@ -40,13 +40,13 @@ export function create_blocks(bytes: number[]): Matrix[] {
 			if (j < slice.length) arr[j] = slice[j];
 			else arr[j] = 16 - slice.length;
 		}
-		result.push(inverse_order(arr));
+		result.push(inverseOrder(arr));
 	}
 
 	return result;
 }
 
-export function inverse_order(matrix: Matrix): Matrix {
+export function inverseOrder(matrix: Matrix): Matrix {
 	const arr: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 	for (let i = 0; i < 4; i++) {
 		for (let j = 0; j < 4; j++) {
@@ -56,7 +56,7 @@ export function inverse_order(matrix: Matrix): Matrix {
 	return arr;
 }
 
-export function print_matrix(matrix: Matrix) {
+export function printMatrix(matrix: Matrix) {
 	for (let i = 0; i < 4; i++) {
 		for (let j = 0; j < 4; j++) {
 			process.stdout.write(`${matrix[4 * i + j].toString(16)} `);
@@ -65,18 +65,21 @@ export function print_matrix(matrix: Matrix) {
 	}
 }
 
-export function substitute_encrypt(matrix: Matrix): Matrix {
+export function substitute(matrix: Matrix, sbox: number[] = sboxEncrypt): Matrix {
 	const arr: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 	for (let i = 0; i < 16; i++) {
-		arr[i] = sbox_encrypt[matrix[i]];
+		arr[i] = sbox[matrix[i]];
 	}
 	return arr;
 }
 
-export function substitute_decrypt(matrix: Matrix): Matrix {
-	const arr: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-	for (let i = 0; i < 16; i++) {
-		arr[i] = sbox_decrypt[arr[i]];
-	}
+export function shiftRows (matrix: Matrix): Matrix {
+	const arr: Matrix = [
+        matrix[0], matrix[1], matrix[2], matrix[3], 
+        matrix[1], matrix[2], matrix[3], matrix[0],
+        matrix[2], matrix[3], matrix[0], matrix[1], 
+        matrix[3], matrix[0], matrix[1], matrix[2],
+    ];
+
 	return arr;
 }
