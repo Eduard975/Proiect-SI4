@@ -80,3 +80,26 @@ export function substitute_decrypt(matrix: Matrix): Matrix {
 	}
 	return arr;
 }
+
+export type Word = [number, number, number, number];
+
+export function rotWord(x: Word): Word {
+	return [x[3], x[0], x[1], x[2]];
+}
+
+export function substituteWordEncrypt(x: Word): Word {
+	return [
+		sbox_encrypt[x[0]],
+		sbox_encrypt[x[1]],
+		sbox_encrypt[x[2]],
+		sbox_encrypt[x[3]],
+	];
+}
+
+const Rcon: number[] = [
+	0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36,
+];
+
+export function rconWord(x: Word, round: number): Word {
+	return [x[0] ^ Rcon[round], x[1], x[2], x[3]];
+}
