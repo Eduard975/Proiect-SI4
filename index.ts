@@ -1,17 +1,22 @@
 console.log("hihi");
 
 import { sbox_encrypt, sbox_decrypt } from "./consts";
-import { create_blocks, print_matrix, string_to_bytes } from "./utils";
+import {
+	create_blocks,
+	inverse_order,
+	type Matrix,
+	print_matrix,
+	string_to_bytes,
+	substitute_encrypt,
+} from "./utils";
 
-const test = 0x74;
+const test2: Matrix = [
+	0x74, 0x6c, 0xe1, 0x09, 0xc5, 0x1e, 0xdd, 0x3b, 0xdf, 0x93, 0x79, 0xc7, 0x3c,
+	0x62, 0xb0, 0xe7,
+];
 
-console.log(sbox_encrypt[test]);
-console.log(string_to_bytes("test"));
+print_matrix(inverse_order(test2));
+console.log();
+print_matrix(substitute_encrypt(inverse_order(test2)));
 
-console.log(create_blocks(string_to_bytes("test")));
-
-const blocks = create_blocks(string_to_bytes("test"));
-
-for (const element of blocks) {
-	print_matrix(element);
-}
+create_blocks(string_to_bytes("aashdashsdhasdh"));

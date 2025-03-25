@@ -1,3 +1,5 @@
+import { sbox_decrypt, sbox_encrypt } from "./consts";
+
 export function string_to_bytes(text: string): number[] {
 	const result: number[] = [];
 
@@ -8,7 +10,7 @@ export function string_to_bytes(text: string): number[] {
 	return result;
 }
 
-type Matrix = [
+export type Matrix = [
 	number,
 	number,
 	number,
@@ -61,4 +63,20 @@ export function print_matrix(matrix: Matrix) {
 		}
 		process.stdout.write("\n");
 	}
+}
+
+export function substitute_encrypt(matrix: Matrix): Matrix {
+	const arr: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+	for (let i = 0; i < 16; i++) {
+		arr[i] = sbox_encrypt[matrix[i]];
+	}
+	return arr;
+}
+
+export function substitute_decrypt(matrix: Matrix): Matrix {
+	const arr: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+	for (let i = 0; i < 16; i++) {
+		arr[i] = sbox_decrypt[arr[i]];
+	}
+	return arr;
 }
