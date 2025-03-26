@@ -1,6 +1,6 @@
-import { sboxDecrypt, sboxEncrypt } from "./consts";
+import { Rcon, sboxDecrypt, sboxEncrypt } from "./consts";
 
-export function string_to_bytes(text: string): number[] {
+export function stringToBytes(text: string): number[] {
   const result: number[] = [];
 
   for (const element of text) {
@@ -40,30 +40,13 @@ export function createBlocks(bytes: number[]): Matrix[] {
       if (j < slice.length) arr[j] = slice[j];
       else arr[j] = 16 - slice.length;
     }
-    result.push(inverseOrder(arr));
+    result.push(transposeMatrix(arr));
   }
 
   return result;
 }
 
-export function cuc(bytes: number[]): Matrix[] {
-  const result: Matrix[] = [];
-  const x = bytes.length;
-
-  for (let i = 0; i < x; i += 16) {
-    const arr: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    const slice = bytes.slice(i, i + 16);
-    for (let j = 0; j < 16; j++) {
-      if (j < slice.length) arr[j] = slice[j];
-      else arr[j] = 16 - slice.length;
-    }
-    result.push(arr);
-  }
-
-  return result;
-}
-
-export function inverseOrder(matrix: Matrix): Matrix {
+export function transposeMatrix(matrix: Matrix): Matrix {
   const arr: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   for (let i = 0; i < 4; i++) {
     for (let j = 0; j < 4; j++) {
@@ -118,222 +101,203 @@ export function shiftRows(matrix: Matrix): Matrix {
 
   return arr;
 }
-export type Word = [number, number, number, number];
 
-export function rotWord(x: Word): Word {
-  return [x[3], x[0], x[1], x[2]];
+function uInt8Mult(a: number, b: number): number {
+  let result = 0;
+  let willOverflow = 0;
+
+  for (let i = 0; i < 8; i++) {
+    if (b & 1) {
+      result ^= a;
+    }
+
+    willOverflow = a & 0x80;
+    a = (a << 1) & 0xff;
+
+    if (willOverflow != 0) {
+      a ^= 0x1b;
+    }
+
+    b >>= 1;
+  }
+
+  return result;
 }
 
-export function substituteWordEncrypt(x: Word): Word {
+function mixColumn(column: number[]): number[] {
+  const arr: number[] = [0, 0, 0, 0];
+
+  arr[0] =
+    uInt8Mult(0x02, column[0]) ^
+    uInt8Mult(0x03, column[1]) ^
+    column[2] ^
+    column[3];
+  arr[1] =
+    column[0] ^
+    uInt8Mult(0x02, column[1]) ^
+    uInt8Mult(0x03, column[2]) ^
+    column[3];
+  arr[2] =
+    column[0] ^
+    column[1] ^
+    uInt8Mult(0x02, column[2]) ^
+    uInt8Mult(0x03, column[3]);
+  arr[3] =
+    uInt8Mult(0x03, column[0]) ^
+    column[1] ^
+    column[2] ^
+    uInt8Mult(0x02, column[3]);
+
+  return arr;
+}
+
+export function breakIntoColumns(matrix: Matrix): number[][] {
+  const columns: number[][] = [[], [], [], []];
+  for (let i = 0; i < 16; i++) {
+    columns[i % 4].push(matrix[i]);
+  }
+  return columns;
+}
+
+export function reassembleMatrix(columns: number[][]): Matrix {
+  // for (let e of columns[0]) process.stdout.write(e.toString(16));
+  // console.log();
   return [
-    sboxEncrypt[x[0]],
-    sboxEncrypt[x[1]],
-    sboxEncrypt[x[2]],
-    sboxEncrypt[x[3]],
+    columns[0][0],
+    columns[1][0],
+    columns[2][0],
+    columns[3][0],
+    columns[0][1],
+    columns[1][1],
+    columns[2][1],
+    columns[3][1],
+    columns[0][2],
+    columns[1][2],
+    columns[2][2],
+    columns[3][2],
+    columns[0][3],
+    columns[1][3],
+    columns[2][3],
+    columns[3][3],
   ];
 }
 
-const Rcon: number[] = [
-  0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36,
-];
-
-export function rconWord(x: Word, round: number): Word {
-  return [x[0] ^ Rcon[round], x[1], x[2], x[3]];
-}
-
-export function bytes_to_string(bytes: number[]): string {
-  return bytes.map((b) => String.fromCharCode(b)).join("");
-}
-
-function gmul2(a: number): number {
-  const result = (a << 1) & 0xff;
-  return a & 0x80 ? result ^ 0x1b : result;
-}
-
-function gmul3(a: number): number {
-  return gmul2(a) ^ a;
-}
-
 export function mixColumns(matrix: Matrix): Matrix {
-  const newMatrix: Matrix = [...matrix];
+  const columns = breakIntoColumns(matrix);
+  const mixedColumns: number[][] = [];
+
   for (let i = 0; i < 4; i++) {
-    const s0 = matrix[i];
-    const s1 = matrix[i + 4];
-    const s2 = matrix[i + 8];
-    const s3 = matrix[i + 12];
-
-    newMatrix[i] = gmul2(s0) ^ gmul3(s1) ^ s2 ^ s3;
-    newMatrix[i + 4] = s0 ^ gmul2(s1) ^ gmul3(s2) ^ s3;
-    newMatrix[i + 8] = s0 ^ s1 ^ gmul2(s2) ^ gmul3(s3);
-    newMatrix[i + 12] = gmul3(s0) ^ s1 ^ s2 ^ gmul2(s3);
+    mixedColumns.push(mixColumn(columns[i]));
   }
-  return newMatrix;
+
+  return reassembleMatrix(mixedColumns);
 }
 
-function multiply(a: number, b: number): number {
-  let product = 0;
-  for (let i = 0; i < 8; i++) {
-    if (b & 1) product ^= a;
-    const carry = a & 0x80;
-    a = (a << 1) & 0xff;
-    if (carry) a ^= 0x1b;
-    b >>= 1;
-  }
-  return product;
+export function rotWord(column: number[]): number[] {
+  return [column[1], column[2], column[3], column[0]];
 }
 
-export function inverseMixColumns(matrix: Matrix): Matrix {
-  const newMatrix: Matrix = [...matrix];
+export function subWord(
+  matrix: number[],
+  sbox: number[] = sboxEncrypt
+): number[] {
+  const arr: number[] = [0, 0, 0, 0];
   for (let i = 0; i < 4; i++) {
-    const s0 = matrix[i];
-    const s1 = matrix[i + 4];
-    const s2 = matrix[i + 8];
-    const s3 = matrix[i + 12];
-
-    newMatrix[i] =
-      multiply(0x0e, s0) ^
-      multiply(0x0b, s1) ^
-      multiply(0x0d, s2) ^
-      multiply(0x09, s3);
-    newMatrix[i + 4] =
-      multiply(0x09, s0) ^
-      multiply(0x0e, s1) ^
-      multiply(0x0b, s2) ^
-      multiply(0x0d, s3);
-    newMatrix[i + 8] =
-      multiply(0x0d, s0) ^
-      multiply(0x09, s1) ^
-      multiply(0x0e, s2) ^
-      multiply(0x0b, s3);
-    newMatrix[i + 12] =
-      multiply(0x0b, s0) ^
-      multiply(0x0d, s1) ^
-      multiply(0x09, s2) ^
-      multiply(0x0e, s3);
+    arr[i] = sbox[matrix[i]];
   }
-  return newMatrix;
+
+  return arr;
 }
 
-export function invShiftRows(matrix: Matrix): Matrix {
-  return [
-    matrix[0],
-    matrix[1],
-    matrix[2],
-    matrix[3],
-    matrix[7],
-    matrix[4],
-    matrix[5],
-    matrix[6],
-    matrix[10],
-    matrix[11],
-    matrix[8],
-    matrix[9],
-    matrix[13],
-    matrix[14],
-    matrix[15],
-    matrix[12],
-  ] as Matrix;
+export function addWord(a: number[], b: number[]): number[] {
+  const arr: number[] = [0, 0, 0, 0];
+  for (let i = 0; i < 4; i++) {
+    arr[i] = (a[i] ^ b[i]) & 0xff;
+  }
+
+  return arr;
 }
 
-export function addRoundKey(state: Matrix, roundKey: Matrix): Matrix {
-  const newState: Matrix = [...state];
+export function addRoundKey(matrix: Matrix, roundKey: Matrix): Matrix {
+  const arr: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   for (let i = 0; i < 16; i++) {
-    newState[i] ^= roundKey[i];
+    arr[i] = (matrix[i] ^ roundKey[i]) & 0xff;
   }
-  return newState;
+
+  return arr;
 }
 
-export function expandKey(key: Matrix): Matrix[] {
-  const words: Word[] = [];
-  for (let i = 0; i < 16; i += 4) {
-    words.push([key[i], key[i + 1], key[i + 2], key[i + 3]]);
+export function generateKeySchedule(key: Matrix): Matrix[] {
+  const keySchedule: Matrix[] = [];
+  keySchedule.push(key);
+
+  let words = breakIntoColumns(key);
+
+  for (let i = 0; i < 10; i++) {
+    const prevWord = words[3];
+
+    let temp = rotWord(prevWord);
+    temp = subWord(temp);
+    temp = addWord(temp, Rcon[i]);
+
+    const newWords: number[][] = [];
+
+    newWords[0] = addWord(words[0], temp);
+
+    for (let j = 1; j < 4; j++) {
+      newWords[j] = addWord(words[j], newWords[j - 1]);
+    }
+
+    keySchedule.push(reassembleMatrix(newWords));
+    words = newWords;
   }
 
-  for (let i = 4; i < 44; i++) {
-    let temp: Word = [...words[i - 1]];
-    if (i % 4 === 0) {
-      temp = substituteWordEncrypt(rotWord(temp));
-      temp[0] ^= Rcon[i / 4];
-    }
-    const newWord: Word = [
-      temp[0] ^ words[i - 4][0],
-      temp[1] ^ words[i - 4][1],
-      temp[2] ^ words[i - 4][2],
-      temp[3] ^ words[i - 4][3],
-    ];
-    words.push(newWord);
-  }
-
-  const roundKeys: Matrix[] = [];
-  for (let i = 0; i < 11; i++) {
-    const roundKey: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    for (let j = 0; j < 4; j++) {
-      const word = words[i * 4 + j];
-      roundKey[j * 4] = word[0];
-      roundKey[j * 4 + 1] = word[1];
-      roundKey[j * 4 + 2] = word[2];
-      roundKey[j * 4 + 3] = word[3];
-    }
-    roundKeys.push(roundKey as Matrix);
-  }
-  return roundKeys;
+  return keySchedule;
 }
 
-export function encrypt(plaintext: string, key: Matrix): string {
-  const bytes = string_to_bytes(plaintext);
-  const blocks = createBlocks(bytes);
-  const roundKeys = expandKey(key);
-  const cipherBlocks: Matrix[] = [];
+export function encrypt(input: Matrix, key: Matrix): Matrix {
+  let state = input;
+  const keySchedule = generateKeySchedule(key);
+  state = addRoundKey(state, keySchedule[0]);
 
-  for (const block of blocks) {
-    let state = addRoundKey(block, roundKeys[0]);
-    let a = print_mstr(state);
-    for (let round = 1; round < 10; round++) {
-      state = substitute(state, sboxEncrypt);
-      state = shiftRows(state);
-      state = mixColumns(state);
-      state = addRoundKey(state, roundKeys[round]);
-    }
-    state = substitute(state, sboxEncrypt);
+  for (let round = 1; round < 10; round++) {
+    // console.log("----Round " + round);
+    // printMatrix(state);
+    // console.log();
+
     state = shiftRows(state);
-    state = addRoundKey(state, roundKeys[10]);
-    cipherBlocks.push(inverseOrder(state));
-  }
-  const cipherBytes = cipherBlocks.flat();
-  return bytes_to_string(cipherBytes);
-}
+    // console.log("--After Shift ");
+    // printMatrix(state);
+    // console.log();
 
-export function decrypt(ciphertext: string, key: Matrix): string {
-  const bytes = string_to_bytes(ciphertext);
-  const blocks = createBlocks(bytes);
-  const roundKeys = expandKey(key);
-  const plainBlocks: Matrix[] = [];
-  for (const block of blocks) {
-    let state = addRoundKey(block, roundKeys[10]);
-    for (let round = 9; round >= 1; round--) {
-      state = invShiftRows(state);
-      state = substitute(state, sboxDecrypt);
-      state = addRoundKey(state, roundKeys[round]);
-      state = inverseMixColumns(state);
-    }
-    state = invShiftRows(state);
-    state = substitute(state, sboxDecrypt);
-    state = addRoundKey(state, roundKeys[0]);
-    plainBlocks.push(inverseOrder(state));
-  }
-  const plainBytes = plainBlocks.flat();
-  const padLength = plainBytes[plainBytes.length - 1];
-  const result = plainBytes.slice(0, plainBytes.length - padLength);
-  return bytes_to_string(result);
-}
+    state = substitute(state);
+    // console.log("--After Subs ");
+    // printMatrix(state);
+    // console.log();
 
-export function print_mstr(m: Matrix): string {
-  let str = "";
-  for (let i = 0; i < 4; i++) {
-    for (let j = 0; j < 4; j++) {
-      str += `${m[4 * j + i].toString(16).padStart(2, "0")}`;
-    }
-    str += " ";
+    state = mixColumns(state);
+    // console.log("--After Mix ");
+    // printMatrix(state);
+    // console.log();
+
+    state = addRoundKey(state, keySchedule[round]);
+
+    // console.log("--After Add key ");
+    // printMatrix(keySchedule[round]);
+    // console.log();
+
+    // printMatrix(state);
+    // console.log();
   }
-  return str;
+
+  state = substitute(state);
+  state = shiftRows(state);
+  state = addRoundKey(state, keySchedule[10]);
+
+  // console.log("Round " + 10);
+  // printMatrix(state);
+  // console.log();
+  // printMatrix(keySchedule[10]);
+  // console.log();
+  return state;
 }
