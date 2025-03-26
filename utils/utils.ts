@@ -1,4 +1,4 @@
-import { Rcon, sboxDecrypt, sboxEncrypt } from "./consts";
+import { Rcon, sboxEncrypt } from "./consts";
 
 export function stringToBytes(text: string): number[] {
   const result: number[] = [];

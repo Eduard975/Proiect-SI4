@@ -1,5 +1,10 @@
-import { encrypt, type Matrix, printMatrix, transposeMatrix } from "./utils";
-import { decrypt } from "./utils-decrypt";
+import {
+  encrypt,
+  type Matrix,
+  printMatrix,
+  transposeMatrix,
+} from "./utils/utils";
+import { decrypt } from "./utils/utils-decrypt";
 
 const key1: Matrix = [
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

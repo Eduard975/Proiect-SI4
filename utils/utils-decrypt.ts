@@ -1,4 +1,4 @@
-import { Rcon, sboxDecrypt, sboxEncrypt } from "./consts";
+import { sboxDecrypt } from "./consts";
 import {
   uInt8Mult,
   addRoundKey,
