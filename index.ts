@@ -40,11 +40,11 @@ console.log("Input");
 printMatrix(input);
 console.log();
 
-console.log("Key1: All 0");
+console.log("-- Key1 -> All 0");
 printMatrix(key1);
 console.log();
 
-console.log("Key2: Hex 1 to 16");
+console.log("-- Key2 -> Hex 1 to 16");
 printMatrix(key2);
 console.log();
 
