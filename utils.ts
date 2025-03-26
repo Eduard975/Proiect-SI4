@@ -102,7 +102,7 @@ export function shiftRows(matrix: Matrix): Matrix {
   return arr;
 }
 
-function uInt8Mult(a: number, b: number): number {
+export function uInt8Mult(a: number, b: number): number {
   let result = 0;
   let willOverflow = 0;
 

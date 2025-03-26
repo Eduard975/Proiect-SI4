@@ -1,4 +1,5 @@
 import { encrypt, type Matrix, printMatrix, transposeMatrix } from "./utils";
+import { decrypt } from "./utils-decrypt";
 
 const key1: Matrix = [
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -42,11 +43,14 @@ console.log();
 
 console.log("-------- Encrypted Results for our AES-128 --------");
 console.log("--- Key 1:");
-printMatrix(encrypt(transposeMatrix(input), transposeMatrix(key1)));
+let res1 = encrypt(transposeMatrix(input), transposeMatrix(key1));
+
+printMatrix(res1);
 console.log();
 
 console.log("--- Key 2:");
-printMatrix(encrypt(transposeMatrix(input), transposeMatrix(key2)));
+let res2 = encrypt(transposeMatrix(input), transposeMatrix(key2));
+printMatrix(res2);
 console.log();
 
 console.log("---------- Expected Result for AES-128 -----------");
@@ -56,4 +60,15 @@ console.log();
 
 console.log("--- Key 2:");
 printMatrix(transposeMatrix(expectedResult_Key1To16));
+console.log();
+
+console.log("---------- Decrypt test for AES-128 -----------");
+console.log("--- Key 1:");
+res1 = transposeMatrix(decrypt(res1, transposeMatrix(key1)));
+printMatrix(res1);
+console.log();
+
+console.log("--- Key 2:");
+res2 = transposeMatrix(decrypt(res2, transposeMatrix(key2)));
+printMatrix(res2);
 console.log();
