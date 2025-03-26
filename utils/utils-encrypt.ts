@@ -9,10 +9,25 @@ import { addRoundKey, generateKeySchedule } from "./utils-key";
 
 export function shiftRows(matrix: Matrix): Matrix {
   const arr: Matrix = [
-    matrix[0], matrix[1], matrix[2], matrix[3],
-    matrix[5], matrix[6], matrix[7], matrix[4],
-    matrix[11], matrix[8], matrix[9], matrix[10],
-    matrix[15], matrix[12], matrix[13], matrix[14],
+    matrix[0],
+    matrix[1],
+    matrix[2],
+    matrix[3],
+
+    matrix[5],
+    matrix[6],
+    matrix[7],
+    matrix[4],
+
+    matrix[10],
+    matrix[11],
+    matrix[8],
+    matrix[9],
+
+    matrix[15],
+    matrix[12],
+    matrix[13],
+    matrix[14],
   ];
 
   return arr;
