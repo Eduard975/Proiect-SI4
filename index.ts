@@ -1,12 +1,12 @@
 import {
   bytesToString,
-  encrypt,
   type Matrix,
   printMatrix,
   stringToBytes,
   transposeMatrix,
 } from "./utils/utils";
 import { decrypt } from "./utils/utils-decrypt";
+import { encrypt } from "./utils/utils-encrypt";
 
 const key1: Matrix = [
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

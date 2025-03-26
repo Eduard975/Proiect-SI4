@@ -1,13 +1,12 @@
 import { sboxDecrypt } from "./consts";
 import {
   uInt8Mult,
-  addRoundKey,
   breakIntoColumns,
   reassembleMatrix,
-  generateKeySchedule,
   Matrix,
   substitute,
 } from "./utils";
+import { addRoundKey, generateKeySchedule } from "./utils-key";
 
 export function inverseShiftRows(matrix: Matrix): Matrix {
   return [
