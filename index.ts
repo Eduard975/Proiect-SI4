@@ -1,8 +1,12 @@
 import { encrypt, type Matrix, printMatrix, transposeMatrix } from "./utils";
 
-const key: Matrix = [
-  0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-  0x0,
+const key1: Matrix = [
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00,
+];
+const key2: Matrix = [
+  0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x10, 0x11, 0x12, 0x13,
+  0x14, 0x15, 0x16,
 ];
 
 const input: Matrix = [
@@ -10,22 +14,46 @@ const input: Matrix = [
   0x62, 0xb0, 0xe7,
 ];
 
-const expectedResult: Matrix = [
+// Expected Results were obtained from
+// https://legacy.cryptool.org/en/cto/aes-step-by-step
+// using the same input and keys
+const expectedResult1_All0Key: Matrix = [
   0x5c, 0xc1, 0xe3, 0x36, 0xeb, 0xcf, 0xbe, 0x48, 0x43, 0xc6, 0x32, 0x79, 0x45,
   0x35, 0xab, 0xb6,
-]; // Result obtained from https://legacy.cryptool.org/en/cto/aes-step-by-step using the same input and key
+];
+
+const expectedResult_Key1To16: Matrix = [
+  0x94, 0x66, 0x3f, 0xec, 0x42, 0xef, 0x7c, 0x56, 0x9f, 0x64, 0x31, 0x32, 0xbb,
+  0x80, 0x69, 0x06,
+];
 
 console.log("----------------- Initial Data -----------------");
 console.log("Input");
 printMatrix(input);
 console.log();
 
-console.log("Key");
-printMatrix(key);
+console.log("Key1: All 0");
+printMatrix(key1);
 console.log();
 
-console.log("-------- Encrypted Result for our AES-128 --------");
-printMatrix(encrypt(transposeMatrix(input), key));
+console.log("Key2: Hex 1 to 16");
+printMatrix(key2);
 console.log();
+
+console.log("-------- Encrypted Results for our AES-128 --------");
+console.log("--- Key 1:");
+printMatrix(encrypt(transposeMatrix(input), transposeMatrix(key1)));
+console.log();
+
+console.log("--- Key 2:");
+printMatrix(encrypt(transposeMatrix(input), transposeMatrix(key2)));
+console.log();
+
 console.log("---------- Expected Result for AES-128 -----------");
-printMatrix(transposeMatrix(expectedResult));
+console.log("--- Key 1:");
+printMatrix(transposeMatrix(expectedResult1_All0Key));
+console.log();
+
+console.log("--- Key 2:");
+printMatrix(transposeMatrix(expectedResult_Key1To16));
+console.log();

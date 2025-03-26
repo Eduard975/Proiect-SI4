@@ -221,6 +221,7 @@ export function addWord(a: number[], b: number[]): number[] {
 export function addRoundKey(matrix: Matrix, roundKey: Matrix): Matrix {
   const arr: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   for (let i = 0; i < 16; i++) {
+    // console.log(matrix[i].toString(16), roundKey[i].toString(16));
     arr[i] = (matrix[i] ^ roundKey[i]) & 0xff;
   }
 
@@ -259,7 +260,9 @@ export function encrypt(input: Matrix, key: Matrix): Matrix {
   let state = input;
   const keySchedule = generateKeySchedule(key);
   state = addRoundKey(state, keySchedule[0]);
-
+  // console.log("----Round " + 0);
+  // printMatrix(state);
+  // console.log();
   for (let round = 1; round < 10; round++) {
     // console.log("----Round " + round);
     // printMatrix(state);
