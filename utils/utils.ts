@@ -1,15 +1,5 @@
 import { Rcon, sboxEncrypt } from "./consts";
 
-export function stringToBytes(text: string): number[] {
-  const result: number[] = [];
-
-  for (const element of text) {
-    result.push(element.charCodeAt(0));
-  }
-
-  return result;
-}
-
 export type Matrix = [
   number,
   number,
@@ -28,6 +18,36 @@ export type Matrix = [
   number,
   number
 ];
+
+export function stringToBytes(text: string): number[] {
+  const result: number[] = [];
+
+  for (const element of text) {
+    result.push(element.charCodeAt(0));
+  }
+
+  if (result.length > 16) {
+    throw Error("Mesajul poate avea maxim 16 caractere");
+  } else if (result.length < 16) {
+    const temp = 16 - result.length;
+    for (let i = 0; i < temp; i++) {
+      result.push(temp);
+      // Daca avem sub 16 caractere atunci umplem
+      // fiecare octet ramas cu o copie a numarului de octeti ramasi
+    }
+  }
+  return result;
+}
+
+export function bytesToString(bytes: Matrix): String {
+  const paddingValue = bytes[bytes.length - 1];
+  const isValidPadding = bytes
+    .slice(-paddingValue)
+    .every((b) => b === paddingValue);
+  return isValidPadding
+    ? String.fromCharCode(...bytes.slice(0, -paddingValue))
+    : String.fromCharCode(...bytes);
+}
 
 export function createBlocks(bytes: number[]): Matrix[] {
   const result: Matrix[] = [];

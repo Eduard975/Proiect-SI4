@@ -1,7 +1,9 @@
 import {
+  bytesToString,
   encrypt,
   type Matrix,
   printMatrix,
+  stringToBytes,
   transposeMatrix,
 } from "./utils/utils";
 import { decrypt } from "./utils/utils-decrypt";
@@ -67,7 +69,7 @@ console.log("--- Key 2:");
 printMatrix(transposeMatrix(expectedResult_Key1To16));
 console.log();
 
-console.log("---------- Decrypt test for AES-128 -----------");
+console.log("---------- Decrypt test for our AES-128 -----------");
 console.log("--- Key 1:");
 res1 = transposeMatrix(decrypt(res1, transposeMatrix(key1)));
 printMatrix(res1);
@@ -77,3 +79,25 @@ console.log("--- Key 2:");
 res2 = transposeMatrix(decrypt(res2, transposeMatrix(key2)));
 printMatrix(res2);
 console.log();
+
+console.log("---------- Encrypt/Decrypt test with string input -----------");
+const temp: number[] = stringToBytes("abcd");
+const mat: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+for (let i = 0; i < 16; i++) {
+  mat[i] = temp[i];
+}
+
+console.log("---Initial\nabcd");
+printMatrix(mat);
+console.log();
+console.log("---Encrypted");
+let res3 = encrypt(transposeMatrix(mat), transposeMatrix(key1));
+printMatrix(res3);
+
+console.log();
+console.log("---Decrypted");
+res3 = transposeMatrix(decrypt(res3, transposeMatrix(key1)));
+console.log(bytesToString(res3));
+printMatrix(res3);
+console.log("\n");
+console.log("* Key used was Key1 *");
