@@ -3,6 +3,7 @@ import {
   Matrix,
   reassembleMatrix,
   substitute,
+  transposeMatrix,
   uInt8Mult,
 } from "./utils";
 import { addRoundKey, generateKeySchedule } from "./utils-key";
@@ -117,5 +118,5 @@ export function encrypt(input: Matrix, key: Matrix): Matrix {
   // console.log();
   // printMatrix(keySchedule[10]);
   // console.log();
-  return state;
+  return transposeMatrix(state);
 }

@@ -4,9 +4,10 @@
   "description": "",
   "main": "index.ts",
   "scripts": {
-    "dev": "ts-node index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "test": "jest aes.test.ts --config=jest.config.js",
+    "start": "ts-node index.ts",
+    "dev": "pnpm run build && pnpm run test && pnpm run start"
   },
   "keywords": [],
   "author": "",
@@ -16,8 +17,11 @@
     "@babel/preset-typescript": "^7.27.0",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.13.13",
+    "jest": "^29.7.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.2"
+  },
+  "dependencies": {
+    "ts-jest": "^29.3.1"
   }
-
 }
