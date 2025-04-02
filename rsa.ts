@@ -1,3 +1,5 @@
+import { randomPrime } from "random-prime";
+
 function modExp(base: bigint, exp: bigint, mod: bigint): bigint {
     let result = 1n;
     base = base % mod;
@@ -16,13 +18,8 @@ function gcd(a: bigint, b: bigint): bigint {
 }
 
 //FOARTE SLOW TRB SCHIMBAT CUMVA, PROBABIL CU LUT(Look Up Table) SAU CIURUL LUI ERASTOSTENE SAU 2P-Q
-function getRandomPrime(min: bigint = 2n, max: bigint = 100000n): bigint {
-
-    let num: bigint;
-    do {
-        num = BigInt(Math.floor(Math.random() * Number(max - min)) + Number(min));
-    } while (!isPrime(num));
-    return num;
+function getRandomPrime(min: number = 2, max: number = 100000): bigint {
+    return BigInt(randomPrime({min, max})!)
 }
 
 function isPrime(num: bigint): boolean {

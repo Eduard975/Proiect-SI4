@@ -22,6 +22,7 @@
     "typescript": "^5.8.2"
   },
   "dependencies": {
+    "random-prime": "^4.0.2",
     "ts-jest": "^29.3.1"
   }
 }
