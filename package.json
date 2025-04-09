@@ -8,7 +8,7 @@
     "test": "jest aes.test.ts --config=jest.config.js",
     "start": "ts-node index.ts",
     "dev": "pnpm run build && pnpm run test && pnpm run start",
-    "ui": "pnpm run build && cp index.html dist/ui/index.html && electron dist/ui/main.js",
+    "ui": "pnpm run build && cp ui/index.html dist/ui/index.html && electron dist/ui/main.js",
     "clean": "rm -r dist"
   },
   "keywords": [],
