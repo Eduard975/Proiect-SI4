@@ -1,6 +1,7 @@
 //Initializator pt Electron
 import { app, BrowserWindow } from "electron";
-import { createServer } from "node:net";
+
+import { createServer, type Socket } from "node:net";
 import path from "node:path";
 
 function createWindow() {
@@ -22,6 +23,20 @@ function createWindow() {
 
 export const host = "127.0.0.1";
 export const port = 7070;
+
+const server = createServer();
+
+server.listen(port, host, () => {
+	console.log(`TCP Server is running on port ${port}.`);
+});
+
+server.on("connection", (socket: Socket) => {
+	console.log("cineva s-a conectat");
+
+	socket.on("message", (message) => {
+		console.log(message);
+	});
+});
 
 app.whenReady().then(() => {
 	createWindow();
