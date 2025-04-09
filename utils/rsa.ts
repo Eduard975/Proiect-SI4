@@ -26,17 +26,19 @@ function gcd(a: bigint, b: bigint): bigint {
 // }
 
 function modInverse(a: bigint, m: bigint): bigint {
-    let m0 = m, x0 = 0n, x1 = 1n;
-
     if (m === 1n) return 0n;
+
+    let m0 = m, x0 = 0n, x1 = 1n;
     let q = a / m;
     let t = m;
 
     while (a > 1n) {
         q = a / m;
         t = m;
+
         m = a % m;
         a = t;
+
         t = x0;
         x0 = x1 - q * x0;
         x1 = t;
@@ -47,7 +49,6 @@ function modInverse(a: bigint, m: bigint): bigint {
     return x1;
 }
 
-//FOARTE SLOW TRB SCHIMBAT CUMVA, PROBABIL CU LUT(Look Up Table) SAU CIURUL LUI ERASTOSTENE SAU 2P-Q
 async function getRandomPrime(bitSize: number = 8) {
     const prime = await fastPrime.random.prime(bitSize);
     console.log(prime)
