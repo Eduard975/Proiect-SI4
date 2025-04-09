@@ -55,10 +55,10 @@ async function getRandomPrime(bitSize: number = 8) {
   }
 
 
-async function generateKeyPair(primeBitSize: number = 8): Promise<{ publicKey: { e: bigint; n: bigint }; 
+async function generateKeyPair(bitSizeForGeneratedPrimeNum: number = 8): Promise<{ publicKey: { e: bigint; n: bigint }; 
                                             privateKey: { d: bigint; n: bigint }; }> {
-    const p =  await getRandomPrime(primeBitSize);
-    const q =  await getRandomPrime(primeBitSize);
+    const p =  await getRandomPrime(bitSizeForGeneratedPrimeNum);
+    const q =  await getRandomPrime(bitSizeForGeneratedPrimeNum);
 
     const n = p * q;
     const phi = (p - 1n) * (q - 1n);
