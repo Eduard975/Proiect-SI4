@@ -80,18 +80,18 @@ function decryptMessage(encryptedMessage: bigint[], privateKey: { d: bigint; n: 
     return encryptedMessage.map(char => String.fromCharCode(Number(modExp(char, privateKey.d, privateKey.n)))).join('');
 }
 
+// Test Code
+// generateKeyPair(16).then(keys => {
+//     const publicKey = keys.publicKey;
+//     const privateKey = keys.privateKey;
 
-generateKeyPair(16).then(keys => {
-    const publicKey = keys.publicKey;
-    const privateKey = keys.privateKey;
+//     console.log('Public Key:', publicKey);
+//     console.log('Private Key:', privateKey);
 
-    console.log('Public Key:', publicKey);
-    console.log('Private Key:', privateKey);
+//     const message = 'Hello';
+//     const encrypted = encryptMessage(message, publicKey);
+//     console.log('Encrypted Message:', encrypted);
 
-    const message = 'Hello';
-    const encrypted = encryptMessage(message, publicKey);
-    console.log('Encrypted Message:', encrypted);
-
-    const decrypted = decryptMessage(encrypted, privateKey);
-    console.log('Decrypted Message:', decrypted);
-});
+//     const decrypted = decryptMessage(encrypted, privateKey);
+//     console.log('Decrypted Message:', decrypted);
+// });
