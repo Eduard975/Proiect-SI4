@@ -2,7 +2,9 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import { createServer, Socket } from "node:net";
 import path from "node:path";
 import { generateKeyPair, encryptMessage, decryptMessage } from "../utils/rsa";
-import { generateRandomMatrix } from "../utils/utils";
+import { generateRandomMatrix, Matrix, transposeMatrix } from "../utils/utils";
+import { encrypt } from "../utils/utils-encrypt";
+import { decrypt } from "../utils/utils-decrypt";
 
 let win: BrowserWindow | null = null;
 
@@ -51,10 +53,31 @@ function parseBigInts(obj: any): any {
   return obj;
 }
 
+function stringToMatrices(str: string): Matrix[] {
+  const encoder = new TextEncoder();
+  const bytes = Array.from(encoder.encode(str));
+  const matrices: Matrix[] = [];
+  for (let i = 0; i < bytes.length; i += 16) {
+    const chunk = bytes.slice(i, i + 16);
+    while (chunk.length < 16) chunk.push(0);
+    matrices.push(chunk as Matrix);
+  }
+  return matrices;
+}
+
+function matricesToString(matrices: Matrix[]): string {
+  const bytes: number[] = [];
+  for (const matrix of matrices) {
+    bytes.push(...matrix);
+  }
+  const decoder = new TextDecoder();
+  return decoder.decode(new Uint8Array(bytes)).replace(/\0+$/, "");
+}
+
 let publicKey: { e: bigint; n: bigint };
 let privateKey: { d: bigint; n: bigint };
-let aesKey: number[] | null = null;
-let myAESKey: number[] | null = null;
+let aesKey: Matrix | null = null;
+let myAESKey: Matrix | null = null;
 
 const peers = new Map<
   string,
@@ -74,6 +97,7 @@ generateKeyPair(9).then((keys) => {
   if (host === "127.0.0.1") {
     aesKey = generateRandomMatrix(16);
     console.log("Generated AES key:", aesKey);
+    myAESKey = aesKey;
   }
 });
 
@@ -105,11 +129,20 @@ server.on("connection", (socket: Socket) => {
         console.log(`Received public key from ${remoteAddress}:`, peerKey);
       } else if (parsed.type === "aes-key") {
         const decrypted = decryptMessage(parsed.data.map(BigInt), privateKey);
-        myAESKey = decrypted.split(",").map((s) => parseInt(s));
+        myAESKey = decrypted.split(",").map((s) => parseInt(s)) as Matrix;
         console.log(`Received and decrypted AES key:`, myAESKey);
+        aesKey = myAESKey;
       } else if (parsed.type === "message") {
-        console.log("Received message:", parsed.data);
-        if (win) win.webContents.send("message-received", parsed.data);
+        if (!myAESKey) {
+          console.warn("AES key not set. Cannot decrypt message.");
+          return;
+        }
+        const decryptedChunks = parsed.data.map((chunk: Matrix) =>
+          decrypt(transposeMatrix(chunk), transposeMatrix(myAESKey!))
+        );
+        const message = matricesToString(decryptedChunks);
+        console.log("Received message:", message);
+        if (win) win.webContents.send("message-received", message);
       }
     } catch (err) {
       console.warn("Invalid JSON received:", message);
@@ -170,15 +203,24 @@ ipcMain.on("add-peer", (event, { ip, port }: { ip: string; port: number }) => {
         }
       } else if (parsed.type === "aes-key") {
         const decrypted = decryptMessage(parsed.data.map(BigInt), privateKey);
-        myAESKey = decrypted.split(",").map((s) => parseInt(s));
+        myAESKey = decrypted.split(",").map((s) => parseInt(s)) as Matrix;
         console.log(
           `Received and decrypted AES key from ${peerKey}:`,
           myAESKey
         );
-      } else if (parsed.type === "message") {
-        console.log(`Message from ${peerKey}: ${parsed.data}`);
-        if (win) win.webContents.send("message-received", parsed.data);
       }
+      // else if (parsed.type === "message") {
+      //   if (!myAESKey) {
+      //     console.warn("AES key not set. Cannot decrypt message.");
+      //     return;
+      //   }
+      //   const decryptedChunks = parsed.data.map((chunk: Matrix) =>
+      //     decrypt(chunk, myAESKey!)
+      //   );
+      //   const message = matricesToString(decryptedChunks);
+      //   console.log(`Message from ${peerKey}: ${message}`);
+      //   if (win) win.webContents.send("message-received", message);
+      // }
     } catch (err) {
       console.warn("Invalid JSON received:", message);
     }
@@ -198,7 +240,20 @@ ipcMain.on("add-peer", (event, { ip, port }: { ip: string; port: number }) => {
 ipcMain.on("send-message", (event, message: string) => {
   console.log(`Sending message to peers: ${message}`);
 
-  const jsonMessage = JSON.stringify({ type: "message", data: message });
+  if (!aesKey) {
+    console.warn("AES key not available. Cannot encrypt message.");
+    return;
+  }
+
+  const messageMatrices = stringToMatrices(message);
+  const encryptedMatrices = messageMatrices.map((matrix) =>
+    encrypt(transposeMatrix(matrix), transposeMatrix(aesKey!))
+  );
+
+  const jsonMessage = JSON.stringify({
+    type: "message",
+    data: encryptedMatrices,
+  });
 
   for (const [peerKey, { socket }] of peers.entries()) {
     if (socket.destroyed) {
