@@ -9,15 +9,19 @@ import { decrypt } from "./utils/utils-decrypt";
 import { encrypt } from "./utils/utils-encrypt";
 
 const key1: Matrix = Array.from(Buffer.alloc(16, 0)) as Matrix;
-const key2: Matrix = Array.from(Buffer.from([
-  0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-  0x09, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16,
-])) as Matrix;
+const key2: Matrix = Array.from(
+  Buffer.from([
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x10, 0x11, 0x12,
+    0x13, 0x14, 0x15, 0x16,
+  ])
+) as Matrix;
 
-const input: Matrix = Array.from(Buffer.from([
-  0x74, 0x6c, 0xe1, 0x09, 0xc5, 0x1e, 0xdd, 0x3b,
-  0xdf, 0x93, 0x79, 0xc7, 0x3c, 0x62, 0xb0, 0xe7,
-])) as Matrix;
+const input: Matrix = Array.from(
+  Buffer.from([
+    0x74, 0x6c, 0xe1, 0x09, 0xc5, 0x1e, 0xdd, 0x3b, 0xdf, 0x93, 0x79, 0xc7,
+    0x3c, 0x62, 0xb0, 0xe7,
+  ])
+) as Matrix;
 
 function encryptWithCrypto(input: Buffer, key: Buffer): Buffer {
   const cipher = crypto.createCipheriv("aes-128-ecb", key, null);
@@ -43,7 +47,7 @@ describe("AES Encryption", () => {
   test("Encrypt with Key2 (Hex 1 to 16)", () => {
     const expected = encryptWithCrypto(Buffer.from(input), Buffer.from(key2));
     const result = encrypt(transposeMatrix(input), transposeMatrix(key2));
-    
+
     console.log("Expected:", expected);
     console.log("Result:", Buffer.from(result));
 
@@ -77,11 +81,14 @@ describe("AES Encrypt/Decrypt with String Input", () => {
       mat[i] = temp[i];
     }
 
-    const encrypted = encrypt((mat), transposeMatrix(key2));
+    const encrypted = encrypt(mat, transposeMatrix(key2));
     console.log("Encrypted:", encrypted);
-    const decrypted = decrypt(transposeMatrix(encrypted), transposeMatrix(key2));
+    const decrypted = decrypt(
+      transposeMatrix(encrypted),
+      transposeMatrix(key2)
+    );
     console.log("Decrypted:", decrypted);
-    
+
     expect(bytesToString(decrypted)).toBe("abcd");
     expect(decrypted).toEqual(mat);
   });
