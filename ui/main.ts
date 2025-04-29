@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { createServer, Socket } from "node:net";
 import path from "node:path";
-import { generateKeyPair } from "../utils/rsa";
+import { generateKeyPair, encryptMessage, decryptMessage } from "../utils/rsa";
+import { generateRandomMatrix } from "../utils/utils";
 
 let win: BrowserWindow | null = null;
 
@@ -20,7 +21,6 @@ function createWindow() {
   win.webContents.openDevTools();
 }
 
-// ---------- BigInt serialization helpers ----------
 function stringifyBigInts(obj: any): any {
   if (typeof obj === "bigint") {
     return obj.toString();
@@ -51,9 +51,10 @@ function parseBigInts(obj: any): any {
   return obj;
 }
 
-// ---------- Key pair and peer storage ----------
 let publicKey: { e: bigint; n: bigint };
 let privateKey: { d: bigint; n: bigint };
+let aesKey: number[] | null = null;
+let myAESKey: number[] | null = null;
 
 const peers = new Map<
   string,
@@ -65,15 +66,17 @@ const args = process.argv.slice(2);
 export const host = args[0];
 export const port = Number(args[1]);
 
-// ---------- Generate RSA keys ----------
 generateKeyPair(9).then((keys) => {
   publicKey = keys.publicKey;
   privateKey = keys.privateKey;
   console.log(`Public key: ${JSON.stringify(stringifyBigInts(publicKey))}`);
   console.log(`Private key: ${JSON.stringify(stringifyBigInts(privateKey))}`);
+  if (host === "127.0.0.1") {
+    aesKey = generateRandomMatrix(16);
+    console.log("Generated AES key:", aesKey);
+  }
 });
 
-// ---------- Server ----------
 const server = createServer();
 
 server.listen(port, host, () => {
@@ -84,7 +87,6 @@ server.on("connection", (socket: Socket) => {
   console.log("Someone connected");
   clients.push(socket);
 
-  // Send our public key
   const keyMessage = JSON.stringify({
     type: "public-key",
     key: stringifyBigInts(publicKey),
@@ -101,6 +103,10 @@ server.on("connection", (socket: Socket) => {
         const peerKey = parseBigInts(parsed.key);
         peers.set(remoteAddress, { socket, publicKey: peerKey });
         console.log(`Received public key from ${remoteAddress}:`, peerKey);
+      } else if (parsed.type === "aes-key") {
+        const decrypted = decryptMessage(parsed.data.map(BigInt), privateKey);
+        myAESKey = decrypted.split(",").map((s) => parseInt(s));
+        console.log(`Received and decrypted AES key:`, myAESKey);
       } else if (parsed.type === "message") {
         console.log("Received message:", parsed.data);
         if (win) win.webContents.send("message-received", parsed.data);
@@ -120,7 +126,6 @@ server.on("connection", (socket: Socket) => {
   });
 });
 
-// ---------- Handle new peers ----------
 ipcMain.on("add-peer", (event, { ip, port }: { ip: string; port: number }) => {
   const peerKey = `${ip}:${port}`;
   if (peers.has(peerKey)) {
@@ -133,7 +138,6 @@ ipcMain.on("add-peer", (event, { ip, port }: { ip: string; port: number }) => {
     console.log(`Connected to peer ${peerKey}`);
     peers.set(peerKey, { socket: client });
 
-    // Send our public key to the peer
     const keyMessage = JSON.stringify({
       type: "public-key",
       key: stringifyBigInts(publicKey),
@@ -151,6 +155,26 @@ ipcMain.on("add-peer", (event, { ip, port }: { ip: string; port: number }) => {
         const entry = peers.get(peerKey);
         if (entry) entry.publicKey = remoteKey;
         console.log(`Received public key from ${peerKey}:`, remoteKey);
+
+        if (aesKey) {
+          const encrypted = encryptMessage(aesKey.join(","), remoteKey).map(
+            (b) => b.toString()
+          );
+
+          const aesMessage = JSON.stringify({
+            type: "aes-key",
+            data: encrypted,
+          });
+          client.write(aesMessage);
+          console.log(`Sent AES key to ${peerKey}`);
+        }
+      } else if (parsed.type === "aes-key") {
+        const decrypted = decryptMessage(parsed.data.map(BigInt), privateKey);
+        myAESKey = decrypted.split(",").map((s) => parseInt(s));
+        console.log(
+          `Received and decrypted AES key from ${peerKey}:`,
+          myAESKey
+        );
       } else if (parsed.type === "message") {
         console.log(`Message from ${peerKey}: ${parsed.data}`);
         if (win) win.webContents.send("message-received", parsed.data);
@@ -171,7 +195,6 @@ ipcMain.on("add-peer", (event, { ip, port }: { ip: string; port: number }) => {
   });
 });
 
-// ---------- Send message to all peers ----------
 ipcMain.on("send-message", (event, message: string) => {
   console.log(`Sending message to peers: ${message}`);
 
@@ -186,7 +209,6 @@ ipcMain.on("send-message", (event, message: string) => {
   }
 });
 
-// ---------- App lifecycle ----------
 app.whenReady().then(() => {
   createWindow();
 

@@ -148,3 +148,11 @@ export function reassembleMatrix(columns: number[][]): Matrix {
     columns[3][3],
   ];
 }
+
+export function generateRandomMatrix(length: number = 16): Matrix {
+  const matrix: Matrix = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < length; i++) {
+    matrix.push(Math.floor(Math.random() * 256)); // 0x00 to 0xFF
+  }
+  return matrix;
+}
