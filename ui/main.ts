@@ -7,6 +7,10 @@ import { encrypt } from "../utils/utils-encrypt";
 import { decrypt } from "../utils/utils-decrypt";
 
 let win: BrowserWindow | null = null;
+const messageFragments = new Map<
+  string,
+  { total: number; blocks: (Matrix | null)[] }
+>();
 
 function createWindow() {
   win = new BrowserWindow({
@@ -52,7 +56,6 @@ function parseBigInts(obj: any): any {
   }
   return obj;
 }
-
 function stringToMatrices(str: string): Matrix[] {
   const encoder = new TextEncoder();
   const bytes = Array.from(encoder.encode(str));
@@ -94,11 +97,6 @@ generateKeyPair(9).then((keys) => {
   privateKey = keys.privateKey;
   console.log(`Public key: ${JSON.stringify(stringifyBigInts(publicKey))}`);
   console.log(`Private key: ${JSON.stringify(stringifyBigInts(privateKey))}`);
-  if (host === "127.0.0.1") {
-    aesKey = generateRandomMatrix(16);
-    console.log("Generated AES key:", aesKey);
-    myAESKey = aesKey;
-  }
 });
 
 const server = createServer();
@@ -114,38 +112,69 @@ server.on("connection", (socket: Socket) => {
   const keyMessage = JSON.stringify({
     type: "public-key",
     key: stringifyBigInts(publicKey),
-  });
+  }) + "\n"; // ✅ Important
   socket.write(keyMessage);
 
-  socket.on("data", (data) => {
-    const message = data.toString();
-    try {
-      const parsed = JSON.parse(message);
+  let buffer = "";
 
-      if (parsed.type === "public-key" && parsed.key) {
-        const remoteAddress = `${socket.remoteAddress}:${socket.remotePort}`;
-        const peerKey = parseBigInts(parsed.key);
-        peers.set(remoteAddress, { socket, publicKey: peerKey });
-        console.log(`Received public key from ${remoteAddress}:`, peerKey);
-      } else if (parsed.type === "aes-key") {
-        const decrypted = decryptMessage(parsed.data.map(BigInt), privateKey);
-        myAESKey = decrypted.split(",").map((s) => parseInt(s)) as Matrix;
-        console.log(`Received and decrypted AES key:`, myAESKey);
-        aesKey = myAESKey;
-      } else if (parsed.type === "message") {
-        if (!myAESKey) {
-          console.warn("AES key not set. Cannot decrypt message.");
-          return;
+  socket.on("data", (data) => {
+    buffer += data.toString();
+
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+
+      try {
+        const parsed = JSON.parse(line);
+
+        if (parsed.type === "public-key" && parsed.key) {
+          const remoteAddress = `${socket.remoteAddress}:${socket.remotePort}`;
+          const peerKey = parseBigInts(parsed.key);
+          peers.set(remoteAddress, { socket, publicKey: peerKey });
+
+        } else if (parsed.type === "aes-key") {
+          try {
+            const decrypted = decryptMessage(parsed.data.map(BigInt), privateKey);
+            const keyMatrix = decrypted.split(",").map((n) => parseInt(n)) as Matrix;
+            myAESKey = keyMatrix;
+            aesKey = keyMatrix;
+
+            console.log("Received and decrypted AES key:", aesKey);
+          } catch (err) {
+            console.error("Failed to decrypt AES key:", err);
+          }
+        } else if (parsed.type === "message-block") {
+          const { messageId, totalBlocks, index, data } = parsed;
+
+          if (!messageFragments.has(messageId)) {
+            messageFragments.set(messageId, {
+              total: totalBlocks,
+              blocks: Array(totalBlocks).fill(null),
+            });
+          }
+
+          const fragment = messageFragments.get(messageId)!;
+          fragment.blocks[index] = data;
+
+          if (fragment.blocks.every((b) => b !== null)) {
+            if (!myAESKey) {
+              console.warn("AES key not set. Cannot decrypt.");
+              return;
+            }
+
+            const decryptedChunks = fragment.blocks.map((chunk: Matrix) =>
+              decrypt(transposeMatrix(chunk!), transposeMatrix(myAESKey!))
+            );
+            const fullMessage = matricesToString(decryptedChunks);
+            console.log("Reassembled message:", fullMessage);
+            messageFragments.delete(messageId);
+            if (win) win.webContents.send("message-received", fullMessage);
+          }
         }
-        const decryptedChunks = parsed.data.map((chunk: Matrix) =>
-          decrypt(transposeMatrix(chunk), transposeMatrix(myAESKey!))
-        );
-        const message = matricesToString(decryptedChunks);
-        console.log("Received message:", message);
-        if (win) win.webContents.send("message-received", message);
+      } catch (err) {
+        console.warn("Invalid JSON or block:", err);
       }
-    } catch (err) {
-      console.warn("Invalid JSON received:", message);
     }
   });
 
@@ -174,55 +203,56 @@ ipcMain.on("add-peer", (event, { ip, port }: { ip: string; port: number }) => {
     const keyMessage = JSON.stringify({
       type: "public-key",
       key: stringifyBigInts(publicKey),
-    });
+    }) + "\n";
     client.write(keyMessage);
   });
 
+  let buffer = "";
   client.on("data", (data) => {
-    const message = data.toString();
-    try {
-      const parsed = JSON.parse(message);
+    buffer += data.toString();
 
-      if (parsed.type === "public-key" && parsed.key) {
-        const remoteKey = parseBigInts(parsed.key);
-        const entry = peers.get(peerKey);
-        if (entry) entry.publicKey = remoteKey;
-        console.log(`Received public key from ${peerKey}:`, remoteKey);
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
 
-        if (aesKey) {
-          const encrypted = encryptMessage(aesKey.join(","), remoteKey).map(
-            (b) => b.toString()
-          );
+      try {
+        const parsed = JSON.parse(line);
 
-          const aesMessage = JSON.stringify({
-            type: "aes-key",
-            data: encrypted,
-          });
-          client.write(aesMessage);
-          console.log(`Sent AES key to ${peerKey}`);
+        if (parsed.type === "public-key" && parsed.key) {
+          const remoteKey = parseBigInts(parsed.key);
+          const entry = peers.get(peerKey);
+          if (entry) entry.publicKey = remoteKey;
+
+          console.log(`Received public key from ${peerKey}:`, remoteKey);
+
+          if (aesKey) {
+            const encrypted = encryptMessage(aesKey.join(","), remoteKey).map((b) =>
+              b.toString()
+            );
+
+            const aesMessage = JSON.stringify({
+              type: "aes-key",
+              data: encrypted,
+            }) + "\n";
+
+            client.write(aesMessage);
+            console.log(`Sent AES key to ${peerKey}`);
+          }
+        } else if (parsed.type === "aes-key") {
+          try {
+            const decrypted = decryptMessage(parsed.data.map(BigInt), privateKey);
+            myAESKey = decrypted.split(",").map((s) => parseInt(s)) as Matrix;
+            aesKey = myAESKey;
+
+            console.log("Received and decrypted AES key:", myAESKey);
+          } catch (err) {
+            console.error("Failed to decrypt AES key:", err);
+          }
         }
-      } else if (parsed.type === "aes-key") {
-        const decrypted = decryptMessage(parsed.data.map(BigInt), privateKey);
-        myAESKey = decrypted.split(",").map((s) => parseInt(s)) as Matrix;
-        console.log(
-          `Received and decrypted AES key from ${peerKey}:`,
-          myAESKey
-        );
+      } catch (err) {
+        console.warn("Invalid JSON received:", line);
       }
-      // else if (parsed.type === "message") {
-      //   if (!myAESKey) {
-      //     console.warn("AES key not set. Cannot decrypt message.");
-      //     return;
-      //   }
-      //   const decryptedChunks = parsed.data.map((chunk: Matrix) =>
-      //     decrypt(chunk, myAESKey!)
-      //   );
-      //   const message = matricesToString(decryptedChunks);
-      //   console.log(`Message from ${peerKey}: ${message}`);
-      //   if (win) win.webContents.send("message-received", message);
-      // }
-    } catch (err) {
-      console.warn("Invalid JSON received:", message);
     }
   });
 
@@ -241,32 +271,56 @@ ipcMain.on("send-message", (event, message: string) => {
   console.log(`Sending message to peers: ${message}`);
 
   if (!aesKey) {
-    console.warn("AES key not available. Cannot encrypt message.");
-    return;
+    aesKey = generateRandomMatrix(16);
+    myAESKey = aesKey;
+    console.log("Generated AES key on demand:", aesKey);
+
+    for (const [peerKey, { publicKey, socket }] of peers.entries()) {
+      if (!publicKey) {
+        console.warn(`No public key for peer ${peerKey}`);
+        continue;
+      }
+
+      const encryptedKey = encryptMessage(aesKey.join(","), publicKey).map((b) =>
+        b.toString()
+      );
+
+      const aesKeyMsg = JSON.stringify({
+        type: "aes-key",
+        data: encryptedKey,
+      }) + "\n";
+
+      socket.write(aesKeyMsg);
+      console.log(`Sent AES key to ${peerKey}`);
+    }
   }
 
-  const messageMatrices = stringToMatrices(message);
-  const encryptedMatrices = messageMatrices.map((matrix) =>
-    encrypt(transposeMatrix(matrix), transposeMatrix(aesKey!))
+  const matrices = stringToMatrices(message);
+  const encrypted = matrices.map((m) =>
+    encrypt(transposeMatrix(m), transposeMatrix(aesKey!))
   );
 
-  const jsonMessage = JSON.stringify({
-    type: "message",
-    data: encryptedMatrices,
-  });
+  const messageId = Math.random().toString(36).slice(2);
 
-  for (const [peerKey, { socket }] of peers.entries()) {
-    if (socket.destroyed) {
-      console.warn(`Connection to ${peerKey} is closed`);
-      continue;
+  encrypted.forEach((block, index) => {
+    const jsonMessage = JSON.stringify({
+      type: "message-block",
+      messageId,
+      totalBlocks: encrypted.length,
+      index,
+      data: block,
+    }) + "\n";
+
+    for (const [, { socket }] of peers.entries()) {
+      if (!socket.destroyed) {
+        socket.write(jsonMessage);
+      }
     }
-    socket.write(jsonMessage);
-  }
+  });
 });
 
 app.whenReady().then(() => {
   createWindow();
-
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
