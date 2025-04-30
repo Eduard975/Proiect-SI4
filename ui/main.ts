@@ -1,16 +1,18 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import { createServer, Socket } from "node:net";
 import path from "node:path";
 import { generateKeyPair, encryptMessage, decryptMessage } from "../utils/rsa";
 import { generateRandomMatrix, Matrix, transposeMatrix } from "../utils/utils";
 import { encrypt } from "../utils/utils-encrypt";
 import { decrypt } from "../utils/utils-decrypt";
+import fs from "fs";
 
 let win: BrowserWindow | null = null;
 const messageFragments = new Map<
   string,
   { total: number; blocks: (Matrix | null)[] }
 >();
+const fileFragments = new Map<string, { filename: string; total: number; blocks: (Matrix | null)[] }>();
 
 function createWindow() {
   win = new BrowserWindow({
@@ -25,6 +27,22 @@ function createWindow() {
 
   win.loadFile("index.html");
   win.webContents.openDevTools();
+}
+
+function bufferToMatrices(buf: Buffer): Matrix[] {
+  const bytes = Array.from(buf);
+  const mats: Matrix[] = [];
+  for (let i = 0; i < bytes.length; i += 16) {
+    const chunk = bytes.slice(i, i + 16);
+    while (chunk.length < 16) chunk.push(0);
+    mats.push(chunk as Matrix);
+  }
+  return mats;
+}
+function matricesToBuffer(mats: Matrix[]): Buffer {
+  const bytes: number[] = [];
+  mats.forEach(m => bytes.push(...m));
+  return Buffer.from(bytes);
 }
 
 function stringifyBigInts(obj: any): any {
@@ -98,7 +116,6 @@ generateKeyPair(9).then((keys) => {
   console.log(`Public key: ${JSON.stringify(stringifyBigInts(publicKey))}`);
   console.log(`Private key: ${JSON.stringify(stringifyBigInts(privateKey))}`);
 });
-
 const server = createServer();
 
 server.listen(port, host, () => {
@@ -109,67 +126,78 @@ server.on("connection", (socket: Socket) => {
   console.log("Someone connected");
   clients.push(socket);
 
-  const keyMessage = JSON.stringify({
-    type: "public-key",
-    key: stringifyBigInts(publicKey),
-  }) + "\n"; // ✅ Important
-  socket.write(keyMessage);
+  // send our public key
+  socket.write(
+    JSON.stringify({ type: "public-key", key: stringifyBigInts(publicKey) }) + "\n"
+  );
 
   let buffer = "";
-
   socket.on("data", (data) => {
     buffer += data.toString();
-
-    let newlineIndex;
+    let newlineIndex: number;
     while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
       const line = buffer.slice(0, newlineIndex);
       buffer = buffer.slice(newlineIndex + 1);
 
       try {
-        const parsed = JSON.parse(line);
+        const msg = JSON.parse(line);
 
-        if (parsed.type === "public-key" && parsed.key) {
-          const remoteAddress = `${socket.remoteAddress}:${socket.remotePort}`;
-          const peerKey = parseBigInts(parsed.key);
-          peers.set(remoteAddress, { socket, publicKey: peerKey });
+        // ─── public-key ───────────────────────────────────
+        if (msg.type === "public-key" && msg.key) {
+          const addr = `${socket.remoteAddress}:${socket.remotePort}`;
+          peers.set(addr, { socket, publicKey: parseBigInts(msg.key) });
 
-        } else if (parsed.type === "aes-key") {
-          try {
-            const decrypted = decryptMessage(parsed.data.map(BigInt), privateKey);
-            const keyMatrix = decrypted.split(",").map((n) => parseInt(n)) as Matrix;
-            myAESKey = keyMatrix;
-            aesKey = keyMatrix;
+        // ─── aes-key ───────────────────────────────────────
+        } else if (msg.type === "aes-key") {
+          const decrypted = decryptMessage(
+            msg.data.map(BigInt),
+            privateKey
+          );
+          const keyArr = decrypted.split(",").map(n => parseInt(n)) as Matrix;
+          myAESKey = keyArr;
+          aesKey = keyArr;
+          console.log("Received AES key");
 
-            console.log("Received and decrypted AES key:", aesKey);
-          } catch (err) {
-            console.error("Failed to decrypt AES key:", err);
-          }
-        } else if (parsed.type === "message-block") {
-          const { messageId, totalBlocks, index, data } = parsed;
-
+        // ─── text message blocks ───────────────────────────
+        } else if (msg.type === "message-block") {
+          const { messageId, totalBlocks, index, data } = msg;
           if (!messageFragments.has(messageId)) {
-            messageFragments.set(messageId, {
-              total: totalBlocks,
-              blocks: Array(totalBlocks).fill(null),
-            });
+            messageFragments.set(messageId, { total: totalBlocks, blocks: Array(totalBlocks).fill(null) });
+          }
+          const frag = messageFragments.get(messageId)!;
+          frag.blocks[index] = data;
+          if (frag.blocks.every(b => b !== null) && myAESKey) {
+            const decrypted = frag.blocks.map((c: Matrix) =>
+              decrypt(transposeMatrix(c), transposeMatrix(myAESKey!))
+            );
+            const text = matricesToString(decrypted);
+            win?.webContents.send("message-received", text);
+            messageFragments.delete(messageId);
           }
 
-          const fragment = messageFragments.get(messageId)!;
-          fragment.blocks[index] = data;
+        // ─── new: incoming file metadata ───────────────────
+        } else if (msg.type === "file-meta") {
+          fileFragments.set(msg.fileId, {
+            filename: msg.filename,
+            total: msg.totalBlocks,
+            blocks: Array(msg.totalBlocks).fill(null),
+          });
 
-          if (fragment.blocks.every((b) => b !== null)) {
-            if (!myAESKey) {
-              console.warn("AES key not set. Cannot decrypt.");
-              return;
+        // ─── new: incoming file block ──────────────────────
+        } else if (msg.type === "file-block") {
+          const frag = fileFragments.get(msg.fileId);
+          if (frag) {
+            frag.blocks[msg.index] = msg.data;
+            if (frag.blocks.every(b => b !== null) && myAESKey) {
+              const decrypted = frag.blocks.map((c: Matrix) =>
+                decrypt(transposeMatrix(c), transposeMatrix(myAESKey!))
+              );
+              const outBuf = matricesToBuffer(decrypted);
+              const savePath = path.join(app.getPath("downloads"), frag.filename);
+              fs.writeFileSync(savePath, outBuf);
+              win?.webContents.send("file-received", savePath);
+              fileFragments.delete(msg.fileId);
             }
-
-            const decryptedChunks = fragment.blocks.map((chunk: Matrix) =>
-              decrypt(transposeMatrix(chunk!), transposeMatrix(myAESKey!))
-            );
-            const fullMessage = matricesToString(decryptedChunks);
-            console.log("Reassembled message:", fullMessage);
-            messageFragments.delete(messageId);
-            if (win) win.webContents.send("message-received", fullMessage);
           }
         }
       } catch (err) {
@@ -182,10 +210,7 @@ server.on("connection", (socket: Socket) => {
     console.log("Client disconnected");
     clients.splice(clients.indexOf(socket), 1);
   });
-
-  socket.on("error", (err) => {
-    console.error("Socket error:", err.message);
-  });
+  socket.on("error", (err) => console.error("Socket error:", err.message));
 });
 
 ipcMain.on("add-peer", (event, { ip, port }: { ip: string; port: number }) => {
@@ -317,6 +342,46 @@ ipcMain.on("send-message", (event, message: string) => {
       }
     }
   });
+});
+
+ipcMain.on("send-file", (_event, filePath: string) => {
+  console.log("🔔 main.ts got send-file:", filePath);
+  if (!filePath || !aesKey) return;
+  const filename = path.basename(filePath);
+  const buf = fs.readFileSync(filePath);
+  const mats = bufferToMatrices(buf);
+  const encrypted = mats.map(m =>
+    encrypt(transposeMatrix(m), transposeMatrix(aesKey!))
+  );
+  const fileId = Math.random().toString(36).slice(2);
+
+  // send metadata
+  const meta = JSON.stringify({
+    type: "file-meta",
+    fileId,
+    filename,
+    totalBlocks: encrypted.length,
+  }) + "\n";
+  peers.forEach(({ socket }) => socket.write(meta));
+
+  // send each chunk
+  encrypted.forEach((block, idx) => {
+    const chunkMsg = JSON.stringify({
+      type: "file-block",
+      fileId,
+      index: idx,
+      data: block,
+    }) + "\n";
+    peers.forEach(({ socket }) => socket.write(chunkMsg));
+  });
+});
+
+ipcMain.handle("dialog:open-file", async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ["openFile"]
+  });
+  if (canceled || filePaths.length === 0) return null;
+  return filePaths[0];
 });
 
 app.whenReady().then(() => {
