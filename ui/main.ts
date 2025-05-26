@@ -6,13 +6,17 @@ import { generateRandomMatrix, Matrix, transposeMatrix } from "../utils/utils";
 import { encrypt } from "../utils/utils-encrypt";
 import { decrypt } from "../utils/utils-decrypt";
 import fs from "fs";
+import crypto from "crypto";
 
 let win: BrowserWindow | null = null;
 const messageFragments = new Map<
   string,
   { total: number; blocks: (Matrix | null)[] }
 >();
-const fileFragments = new Map<string, { filename: string; total: number; blocks: (Matrix | null)[] }>();
+const fileFragments = new Map<
+  string,
+  { filename: string; total: number; blocks: (Matrix | null)[] }
+>();
 
 function createWindow() {
   win = new BrowserWindow({
@@ -41,7 +45,7 @@ function bufferToMatrices(buf: Buffer): Matrix[] {
 }
 function matricesToBuffer(mats: Matrix[]): Buffer {
   const bytes: number[] = [];
-  mats.forEach(m => bytes.push(...m));
+  mats.forEach((m) => bytes.push(...m));
   return Buffer.from(bytes);
 }
 
@@ -58,6 +62,11 @@ function stringifyBigInts(obj: any): any {
     return result;
   }
   return obj;
+}
+
+function md5Hash(buf: Buffer | Matrix): string {
+  const data = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  return crypto.createHash("md5").update(data).digest("hex");
 }
 
 function parseBigInts(obj: any): any {
@@ -109,13 +118,24 @@ const clients: Socket[] = [];
 const args = process.argv.slice(2);
 export const host = args[0];
 export const port = Number(args[1]);
+export const isMaster = args.includes("--master");
+
+console.log(`🔑 Node type: ${isMaster ? "MASTER" : "CLIENT"}`);
 
 generateKeyPair(9).then((keys) => {
   publicKey = keys.publicKey;
   privateKey = keys.privateKey;
   console.log(`Public key: ${JSON.stringify(stringifyBigInts(publicKey))}`);
   console.log(`Private key: ${JSON.stringify(stringifyBigInts(privateKey))}`);
+
+  // Only master generates AES key at startup
+  if (isMaster) {
+    aesKey = generateRandomMatrix(16);
+    myAESKey = aesKey;
+    console.log("🔑 Master generated AES key:", aesKey);
+  }
 });
+
 const server = createServer();
 
 server.listen(port, host, () => {
@@ -128,8 +148,29 @@ server.on("connection", (socket: Socket) => {
 
   // send our public key
   socket.write(
-    JSON.stringify({ type: "public-key", key: stringifyBigInts(publicKey) }) + "\n"
+    JSON.stringify({ type: "public-key", key: stringifyBigInts(publicKey) }) +
+      "\n"
   );
+
+  // If this is master and we have an AES key, send it to the new client
+  if (isMaster && aesKey) {
+    const addr = `${socket.remoteAddress}:${socket.remotePort}`;
+    setTimeout(() => {
+      const peer = peers.get(addr);
+      if (peer && peer.publicKey) {
+        const encrypted = encryptMessage(aesKey!.join(","), peer.publicKey).map(
+          (b) => b.toString()
+        );
+        const aesMessage =
+          JSON.stringify({
+            type: "aes-key",
+            data: encrypted,
+          }) + "\n";
+        socket.write(aesMessage);
+        console.log(`🔑 Master sent AES key to new client ${addr}`);
+      }
+    }, 100);
+  }
 
   let buffer = "";
   socket.on("data", (data) => {
@@ -146,55 +187,122 @@ server.on("connection", (socket: Socket) => {
         if (msg.type === "public-key" && msg.key) {
           const addr = `${socket.remoteAddress}:${socket.remotePort}`;
           peers.set(addr, { socket, publicKey: parseBigInts(msg.key) });
+          console.log(`🔑 Received public key from ${addr}`);
 
-        // ─── aes-key ───────────────────────────────────────
+          // ─── aes-key ───────────────────────────────────────
         } else if (msg.type === "aes-key") {
-          const decrypted = decryptMessage(
-            msg.data.map(BigInt),
-            privateKey
-          );
-          const keyArr = decrypted.split(",").map(n => parseInt(n)) as Matrix;
+          if (isMaster) {
+            console.warn(
+              "⚠️ Master received AES key - ignoring (master should not receive keys)"
+            );
+            return;
+          }
+          const decrypted = decryptMessage(msg.data.map(BigInt), privateKey);
+          const keyArr = decrypted.split(",").map((n) => parseInt(n)) as Matrix;
           myAESKey = keyArr;
           aesKey = keyArr;
-          console.log("Received AES key");
+          console.log("🔑 Client received AES key from master");
 
-        // ─── text message blocks ───────────────────────────
+          // ─── text message blocks ───────────────────────────
         } else if (msg.type === "message-block") {
           const { messageId, totalBlocks, index, data } = msg;
+          const blockHash = md5Hash(data);
+          console.log(
+            `📥 Received message block ${index}/${
+              totalBlocks - 1
+            } (MD5: ${blockHash})`
+          );
+
           if (!messageFragments.has(messageId)) {
-            messageFragments.set(messageId, { total: totalBlocks, blocks: Array(totalBlocks).fill(null) });
+            messageFragments.set(messageId, {
+              total: totalBlocks,
+              blocks: Array(totalBlocks).fill(null),
+            });
           }
           const frag = messageFragments.get(messageId)!;
           frag.blocks[index] = data;
-          if (frag.blocks.every(b => b !== null) && myAESKey) {
-            const decrypted = frag.blocks.map((c: Matrix) =>
-              decrypt(transposeMatrix(c), transposeMatrix(myAESKey!))
+          console.log(
+            `📥 Stored message block ${index} at position ${index}, have ${
+              frag.blocks.filter((b) => b !== null).length
+            }/${frag.total} blocks`
+          );
+
+          if (frag.blocks.every((b) => b !== null) && myAESKey) {
+            console.log(
+              `🔄 All message blocks received, processing in order...`
             );
-            const text = matricesToString(decrypted);
+            console.log(
+              `🔍 Block order check: indices [${frag.blocks
+                .map((_, i) => i)
+                .join(", ")}]`
+            );
+
+            // Blocks are already in correct order since we use frag.blocks[index] = data
+            const decrypted_original_blocks = frag.blocks.map(
+              (c: Matrix, i: number) => {
+                console.log(`🔓 Decrypting block at index ${i}`);
+                const decrypted_transposed_block = decrypt(
+                  transposeMatrix(c!),
+                  transposeMatrix(myAESKey!)
+                );
+                // Apply transpose again to get the original block
+                return transposeMatrix(decrypted_transposed_block!);
+              }
+            );
+            const text = matricesToString(decrypted_original_blocks); // Pass the correctly oriented blocks
+            console.log(`💬 Message fully received and decrypted: "${text}"`);
             win?.webContents.send("message-received", text);
             messageFragments.delete(messageId);
           }
 
-        // ─── new: incoming file metadata ───────────────────
+          // ─── new: incoming file metadata ───────────────────
         } else if (msg.type === "file-meta") {
+          console.log(
+            `📥 Receiving file metadata: ${msg.filename} (${msg.totalBlocks} blocks)`
+          );
           fileFragments.set(msg.fileId, {
             filename: msg.filename,
             total: msg.totalBlocks,
             blocks: Array(msg.totalBlocks).fill(null),
           });
 
-        // ─── new: incoming file block ──────────────────────
+          // ─── new: incoming file block ──────────────────────
         } else if (msg.type === "file-block") {
           const frag = fileFragments.get(msg.fileId);
           if (frag) {
+            const blockHash = md5Hash(msg.data);
+            console.log(
+              `📥 Received file block ${msg.index}/${
+                frag.total - 1
+              } (MD5: ${blockHash}) for ${frag.filename}`
+            );
+
             frag.blocks[msg.index] = msg.data;
-            if (frag.blocks.every(b => b !== null) && myAESKey) {
-              const decrypted = frag.blocks.map((c: Matrix) =>
-                decrypt(transposeMatrix(c), transposeMatrix(myAESKey!))
+            if (frag.blocks.every((b) => b !== null) && myAESKey) {
+              console.log(
+                `🔄 All file blocks received for ${frag.filename}, processing in order...`
               );
-              const outBuf = matricesToBuffer(decrypted);
-              const savePath = path.join(app.getPath("downloads"), frag.filename);
+              // Blocks are already in correct order since we use frag.blocks[index] = data
+              const decrypted_original_blocks = frag.blocks.map((c: Matrix) => {
+                const decrypted_transposed_block = decrypt(
+                  transposeMatrix(c!),
+                  transposeMatrix(myAESKey!)
+                );
+                // Apply transpose again to get the original block
+                return transposeMatrix(decrypted_transposed_block!);
+              });
+              const outBuf = matricesToBuffer(decrypted_original_blocks);
+              const fileHash = md5Hash(outBuf);
+              console.log(
+                `📥 File ${frag.filename} fully received and decrypted (MD5: ${fileHash})`
+              );
+
+              const savePath = path.join(
+                app.getPath("downloads"),
+                frag.filename
+              );
               fs.writeFileSync(savePath, outBuf);
+              console.log(`💾 File saved to: ${savePath}`);
               win?.webContents.send("file-received", savePath);
               fileFragments.delete(msg.fileId);
             }
@@ -225,10 +333,11 @@ ipcMain.on("add-peer", (event, { ip, port }: { ip: string; port: number }) => {
     console.log(`Connected to peer ${peerKey}`);
     peers.set(peerKey, { socket: client });
 
-    const keyMessage = JSON.stringify({
-      type: "public-key",
-      key: stringifyBigInts(publicKey),
-    }) + "\n";
+    const keyMessage =
+      JSON.stringify({
+        type: "public-key",
+        key: stringifyBigInts(publicKey),
+      }) + "\n";
     client.write(keyMessage);
   });
 
@@ -249,28 +358,39 @@ ipcMain.on("add-peer", (event, { ip, port }: { ip: string; port: number }) => {
           const entry = peers.get(peerKey);
           if (entry) entry.publicKey = remoteKey;
 
-          console.log(`Received public key from ${peerKey}:`, remoteKey);
+          console.log(`🔑 Received public key from ${peerKey}`);
 
-          if (aesKey) {
-            const encrypted = encryptMessage(aesKey.join(","), remoteKey).map((b) =>
-              b.toString()
+          // Only master sends AES keys to peers
+          if (isMaster && aesKey) {
+            const encrypted = encryptMessage(aesKey.join(","), remoteKey).map(
+              (b) => b.toString()
             );
 
-            const aesMessage = JSON.stringify({
-              type: "aes-key",
-              data: encrypted,
-            }) + "\n";
+            const aesMessage =
+              JSON.stringify({
+                type: "aes-key",
+                data: encrypted,
+              }) + "\n";
 
             client.write(aesMessage);
-            console.log(`Sent AES key to ${peerKey}`);
+            console.log(`🔑 Master sent AES key to ${peerKey}`);
           }
         } else if (parsed.type === "aes-key") {
+          if (isMaster) {
+            console.warn(
+              "⚠️ Master received AES key - ignoring (master should not receive keys)"
+            );
+            return;
+          }
           try {
-            const decrypted = decryptMessage(parsed.data.map(BigInt), privateKey);
+            const decrypted = decryptMessage(
+              parsed.data.map(BigInt),
+              privateKey
+            );
             myAESKey = decrypted.split(",").map((s) => parseInt(s)) as Matrix;
             aesKey = myAESKey;
 
-            console.log("Received and decrypted AES key:", myAESKey);
+            console.log("🔑 Client received and decrypted AES key from master");
           } catch (err) {
             console.error("Failed to decrypt AES key:", err);
           }
@@ -295,28 +415,38 @@ ipcMain.on("add-peer", (event, { ip, port }: { ip: string; port: number }) => {
 ipcMain.on("send-message", (event, message: string) => {
   console.log(`Sending message to peers: ${message}`);
 
+  // Only master can generate AES key, clients must have received it
   if (!aesKey) {
-    aesKey = generateRandomMatrix(16);
-    myAESKey = aesKey;
-    console.log("Generated AES key on demand:", aesKey);
+    if (isMaster) {
+      aesKey = generateRandomMatrix(16);
+      myAESKey = aesKey;
+      console.log("🔑 Master generated AES key on demand:", aesKey);
 
-    for (const [peerKey, { publicKey, socket }] of peers.entries()) {
-      if (!publicKey) {
-        console.warn(`No public key for peer ${peerKey}`);
-        continue;
+      // Send key to all connected peers
+      for (const [peerKey, { publicKey, socket }] of peers.entries()) {
+        if (!publicKey) {
+          console.warn(`No public key for peer ${peerKey}`);
+          continue;
+        }
+
+        const encryptedKey = encryptMessage(aesKey.join(","), publicKey).map(
+          (b) => b.toString()
+        );
+
+        const aesKeyMsg =
+          JSON.stringify({
+            type: "aes-key",
+            data: encryptedKey,
+          }) + "\n";
+
+        socket.write(aesKeyMsg);
+        console.log(`🔑 Master sent AES key to ${peerKey}`);
       }
-
-      const encryptedKey = encryptMessage(aesKey.join(","), publicKey).map((b) =>
-        b.toString()
+    } else {
+      console.error(
+        "❌ Client cannot send messages without AES key from master"
       );
-
-      const aesKeyMsg = JSON.stringify({
-        type: "aes-key",
-        data: encryptedKey,
-      }) + "\n";
-
-      socket.write(aesKeyMsg);
-      console.log(`Sent AES key to ${peerKey}`);
+      return;
     }
   }
 
@@ -328,13 +458,20 @@ ipcMain.on("send-message", (event, message: string) => {
   const messageId = Math.random().toString(36).slice(2);
 
   encrypted.forEach((block, index) => {
-    const jsonMessage = JSON.stringify({
-      type: "message-block",
-      messageId,
-      totalBlocks: encrypted.length,
-      index,
-      data: block,
-    }) + "\n";
+    const chunkHash = md5Hash(block);
+    console.log(
+      `📤 Sending message block ${index}/${
+        encrypted.length - 1
+      } (MD5: ${chunkHash})`
+    );
+    const jsonMessage =
+      JSON.stringify({
+        type: "message-block",
+        messageId,
+        totalBlocks: encrypted.length,
+        index,
+        data: block,
+      }) + "\n";
 
     for (const [, { socket }] of peers.entries()) {
       if (!socket.destroyed) {
@@ -345,40 +482,73 @@ ipcMain.on("send-message", (event, message: string) => {
 });
 
 ipcMain.on("send-file", (_event, filePath: string) => {
-  console.log("🔔 main.ts got send-file:", filePath);
-  if (!filePath || !aesKey) return;
+  console.log("📤 Sending file:", filePath);
+
+  if (!filePath) {
+    console.error("❌ No file path provided");
+    return;
+  }
+
+  if (!aesKey) {
+    if (isMaster) {
+      console.warn("⚠️ Master has no AES key - this shouldn't happen");
+    } else {
+      console.error("❌ Client cannot send files without AES key from master");
+    }
+    return;
+  }
+
   const filename = path.basename(filePath);
   const buf = fs.readFileSync(filePath);
+  const originalFileHash = md5Hash(buf);
+  console.log(
+    `📤 Original file ${filename} (size: ${buf.length} bytes, MD5: ${originalFileHash})`
+  );
+
   const mats = bufferToMatrices(buf);
-  const encrypted = mats.map(m =>
+  const encrypted = mats.map((m) =>
     encrypt(transposeMatrix(m), transposeMatrix(aesKey!))
   );
   const fileId = Math.random().toString(36).slice(2);
 
+  console.log(`📤 File split into ${encrypted.length} encrypted blocks`);
+
   // send metadata
-  const meta = JSON.stringify({
-    type: "file-meta",
-    fileId,
-    filename,
-    totalBlocks: encrypted.length,
-  }) + "\n";
+  const meta =
+    JSON.stringify({
+      type: "file-meta",
+      fileId,
+      filename,
+      totalBlocks: encrypted.length,
+    }) + "\n";
   peers.forEach(({ socket }) => socket.write(meta));
+  console.log(`📤 Sent file metadata for ${filename}`);
 
   // send each chunk
   encrypted.forEach((block, idx) => {
-    const chunkMsg = JSON.stringify({
-      type: "file-block",
-      fileId,
-      index: idx,
-      data: block,
-    }) + "\n";
+    const blockHash = md5Hash(block);
+    console.log(
+      `📤 Sending file block ${idx}/${
+        encrypted.length - 1
+      } (MD5: ${blockHash}) for ${filename}`
+    );
+
+    const chunkMsg =
+      JSON.stringify({
+        type: "file-block",
+        fileId,
+        index: idx,
+        data: block,
+      }) + "\n";
     peers.forEach(({ socket }) => socket.write(chunkMsg));
   });
+
+  console.log(`📤 Finished sending all blocks for ${filename}`);
 });
 
 ipcMain.handle("dialog:open-file", async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
-    properties: ["openFile"]
+    properties: ["openFile"],
   });
   if (canceled || filePaths.length === 0) return null;
   return filePaths[0];
