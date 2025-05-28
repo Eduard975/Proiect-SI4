@@ -17,6 +17,7 @@ const fileFragments = new Map<
   string,
   { filename: string; total: number; blocks: (Matrix | null)[] }
 >();
+const processedFiles = new Set<string>();
 
 function createWindow() {
   win = new BrowserWindow({
@@ -257,6 +258,13 @@ server.on("connection", (socket: Socket) => {
 
           // ─── new: incoming file metadata ───────────────────
         } else if (msg.type === "file-meta") {
+          if (processedFiles.has(msg.fileId)) {
+            console.log(
+              `🔄 Ignoring duplicate file metadata for: ${msg.filename}`
+            );
+
+            return;
+          }
           console.log(
             `📥 Receiving file metadata: ${msg.filename} (${msg.totalBlocks} blocks)`
           );
@@ -269,43 +277,80 @@ server.on("connection", (socket: Socket) => {
           // ─── new: incoming file block ──────────────────────
         } else if (msg.type === "file-block") {
           const frag = fileFragments.get(msg.fileId);
-          if (frag) {
-            const blockHash = md5Hash(msg.data);
+          if (!frag) {
+            return; // No metadata received yet, ignore block
+          }
+
+          // Check if we've already processed this file completely
+          if (processedFiles.has(msg.fileId)) {
+            return; // Already processed this file, ignore additional blocks
+          }
+
+          const blockHash = md5Hash(msg.data);
+          console.log(
+            `📥 Received file block ${msg.index}/${
+              frag.total - 1
+            } (MD5: ${blockHash}) for ${frag.filename}`
+          );
+
+          frag.blocks[msg.index] = msg.data;
+          if (frag.blocks.every((b) => b !== null) && myAESKey) {
+            // Mark this file as processed to prevent duplicates
+            processedFiles.add(msg.fileId);
+
+            // Clean up processed file IDs after some time to prevent memory leaks
+            setTimeout(() => {
+              processedFiles.delete(msg.fileId);
+            }, 10 * 60 * 1000); // Remove after 10 minutes
+
             console.log(
-              `📥 Received file block ${msg.index}/${
-                frag.total - 1
-              } (MD5: ${blockHash}) for ${frag.filename}`
+              `🔄 All file blocks received for ${frag.filename}, processing in order...`
+            );
+            // Blocks are already in correct order since we use frag.blocks[index] = data
+            const decrypted_original_blocks = frag.blocks.map((c: Matrix) => {
+              const decrypted_transposed_block = decrypt(
+                transposeMatrix(c!),
+                transposeMatrix(myAESKey!)
+              );
+              // Apply transpose again to get the original block
+              return transposeMatrix(decrypted_transposed_block!);
+            });
+            const outBuf = matricesToBuffer(decrypted_original_blocks);
+            const fileHash = md5Hash(outBuf);
+            console.log(
+              `📥 File ${frag.filename} fully received and decrypted (MD5: ${fileHash})`
             );
 
-            frag.blocks[msg.index] = msg.data;
-            if (frag.blocks.every((b) => b !== null) && myAESKey) {
-              console.log(
-                `🔄 All file blocks received for ${frag.filename}, processing in order...`
-              );
-              // Blocks are already in correct order since we use frag.blocks[index] = data
-              const decrypted_original_blocks = frag.blocks.map((c: Matrix) => {
-                const decrypted_transposed_block = decrypt(
-                  transposeMatrix(c!),
-                  transposeMatrix(myAESKey!)
-                );
-                // Apply transpose again to get the original block
-                return transposeMatrix(decrypted_transposed_block!);
-              });
-              const outBuf = matricesToBuffer(decrypted_original_blocks);
-              const fileHash = md5Hash(outBuf);
-              console.log(
-                `📥 File ${frag.filename} fully received and decrypted (MD5: ${fileHash})`
-              );
+            const today = new Date().toISOString().split("T")[0]; // Gets YYYY-MM-DD format
+            const chatFolderPath = path.join(
+              app.getPath("downloads"),
+              "chat",
+              today
+            );
 
-              const savePath = path.join(
-                app.getPath("downloads"),
-                frag.filename
-              );
-              fs.writeFileSync(savePath, outBuf);
-              console.log(`💾 File saved to: ${savePath}`);
-              win?.webContents.send("file-received", savePath);
-              fileFragments.delete(msg.fileId);
+            if (!fs.existsSync(chatFolderPath)) {
+              fs.mkdirSync(chatFolderPath, { recursive: true });
+              console.log(`📁 Created chat folder: ${chatFolderPath}`);
             }
+
+            const savePath = path.join(chatFolderPath, frag.filename);
+
+            let finalSavePath = savePath;
+            let counter = 1;
+            while (fs.existsSync(finalSavePath)) {
+              const extension = path.extname(frag.filename);
+              const basename = path.basename(frag.filename, extension);
+              finalSavePath = path.join(
+                chatFolderPath,
+                `${basename} (${counter})${extension}`
+              );
+              counter++;
+            }
+
+            fs.writeFileSync(finalSavePath, outBuf);
+            console.log(`💾 File saved to: ${finalSavePath}`);
+            win?.webContents.send("file-received", finalSavePath);
+            fileFragments.delete(msg.fileId);
           }
         }
       } catch (err) {
@@ -513,7 +558,11 @@ ipcMain.on("send-file", (_event, filePath: string) => {
 
   console.log(`📤 File split into ${encrypted.length} encrypted blocks`);
 
-  // send metadata
+  // Show the file in sender's UI immediately
+  console.log(`📤 Showing sent file in sender's UI: ${filePath}`);
+  win?.webContents.send("file-sent", filePath);
+
+  // send metadata to other peers
   const meta =
     JSON.stringify({
       type: "file-meta",
@@ -524,7 +573,7 @@ ipcMain.on("send-file", (_event, filePath: string) => {
   peers.forEach(({ socket }) => socket.write(meta));
   console.log(`📤 Sent file metadata for ${filename}`);
 
-  // send each chunk
+  // send each chunk to other peers
   encrypted.forEach((block, idx) => {
     const blockHash = md5Hash(block);
     console.log(

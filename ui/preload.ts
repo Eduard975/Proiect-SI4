@@ -19,15 +19,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
   sendFile: (filePath: string): void => {
     ipcRenderer.send("send-file", filePath);
   },
-  
+
   openFileDialog: (): Promise<string | null> => {
     return ipcRenderer.invoke("dialog:open-file");
   },
 
-
   onFileReceived: (cb: (savePath: string) => void): void => {
     ipcRenderer.on("file-received", (_evt, savePath: string) => {
       cb(savePath);
+    });
+  },
+
+  // NEW: Add handler for sent files
+  onFileSent: (cb: (filePath: string) => void): void => {
+    ipcRenderer.on("file-sent", (_evt, filePath: string) => {
+      cb(filePath);
     });
   },
 });
