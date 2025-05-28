@@ -84,6 +84,7 @@ function parseBigInts(obj: any): any {
   }
   return obj;
 }
+
 function stringToMatrices(str: string): Matrix[] {
   const encoder = new TextEncoder();
   const bytes = Array.from(encoder.encode(str));
